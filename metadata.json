@@ -1,0 +1,9 @@
+
+{
+  "name": "JSON2Video Lite",
+  "description": "High-performance browser-based JSON to Video rendering engine with AI-assisted scene generation.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
