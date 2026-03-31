@@ -9,10 +9,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@babel/standalone": "^7.28.6",
+    "@remotion/player": "^4.0.441",
+    "@remotion/web-renderer": "^4.0.441",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3"
+    "react-dom": "^19.2.3",
+    "remotion": "^4.0.441"
   },
   "devDependencies": {
+    "@types/babel__standalone": "^7.1.9",
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "typescript": "~5.8.2",

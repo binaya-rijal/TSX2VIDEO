@@ -1,7 +1,7 @@
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { SceneDefinition, RenderingStatus, AspectRatio, Resolution } from './types';
-import { drawFrame } from './services/renderService';
+import React, { useState, useRef, useMemo } from 'react';
+import { RenderingStatus, AspectRatio, Resolution } from './types';
+import RemotionPreview, { type RemotionPreviewHandle } from './components/RemotionPreview';
 
 // Provider configurations
 const PROVIDERS = {
@@ -93,148 +93,6 @@ export default function Scene({ frame, fps, width, height }: SceneProps) {
   );
 }`;
 
-// Parse TSX to SceneDefinition
-const parseTsxToScene = (tsxCode: string, aspectRatio: AspectRatio, duration: number, fps: number): SceneDefinition | null => {
-  try {
-    const layers: any[] = [];
-    
-    // Extract Shape components
-    const shapeRegex = /<Shape([^/>]*(?:\/>|>[^<]*<\/Shape>))/g;
-    let match;
-    let layerId = 0;
-    
-    while ((match = shapeRegex.exec(tsxCode)) !== null) {
-      const props = match[1];
-      layers.push({
-        id: `shape-${layerId++}`,
-        type: 'shape',
-        style: extractProps(props),
-        animations: extractAnimations(props)
-      });
-    }
-    
-    // Extract Text components
-    const textRegex = /<Text([^>]*)>([^<]*)<\/Text>/g;
-    while ((match = textRegex.exec(tsxCode)) !== null) {
-      const props = match[1];
-      const content = match[2].trim();
-      layers.push({
-        id: `text-${layerId++}`,
-        type: 'text',
-        content,
-        style: extractProps(props),
-        animations: extractAnimations(props)
-      });
-    }
-    
-    // Extract Image components
-    const imageRegex = /<Image([^/>]*)\/>/g;
-    while ((match = imageRegex.exec(tsxCode)) !== null) {
-      const props = match[1];
-      const srcMatch = props.match(/src=["']([^"']+)["']|src=\{["']([^"']+)["']\}/);
-      layers.push({
-        id: `image-${layerId++}`,
-        type: 'image',
-        src: srcMatch ? (srcMatch[1] || srcMatch[2]) : '',
-        style: extractProps(props),
-        animations: extractAnimations(props)
-      });
-    }
-    
-    const width = aspectRatio === '16:9' ? 1920 : 1080;
-    const height = aspectRatio === '16:9' ? 1080 : 1920;
-    
-    return {
-      compositionConfig: {
-        id: 'TSXScene',
-        durationInSeconds: duration,
-        fps: fps,
-        width,
-        height
-      },
-      preGeneratedData: {},
-      layers
-    };
-  } catch (e) {
-    console.error('TSX parsing error:', e);
-    return null;
-  }
-};
-
-// Helper to extract props from TSX attribute string
-const extractProps = (propsStr: string): any => {
-  const style: any = {};
-  
-  // Extract string props: prop="value" or prop={'value'}
-  const stringProps = ['x', 'y', 'width', 'height', 'backgroundColor', 'color', 'textAlign'];
-  stringProps.forEach(prop => {
-    const regex = new RegExp(`${prop}=["']([^"']+)["']|${prop}=\\{["']([^"']+)["']\\}`);
-    const match = propsStr.match(regex);
-    if (match) style[prop] = match[1] || match[2];
-  });
-  
-  // Extract number props: prop={123}
-  const numberProps = ['fontSize', 'opacity', 'borderRadius', 'rotation'];
-  numberProps.forEach(prop => {
-    const regex = new RegExp(`${prop}=\\{([\\d.]+)\\}`);
-    const match = propsStr.match(regex);
-    if (match) style[prop] = parseFloat(match[1]);
-  });
-  
-  // Handle width/height as numbers too
-  ['width', 'height'].forEach(prop => {
-    if (!style[prop]) {
-      const regex = new RegExp(`${prop}=\\{([\\d.]+)\\}`);
-      const match = propsStr.match(regex);
-      if (match) style[prop] = parseFloat(match[1]);
-    }
-  });
-  
-  return style;
-};
-
-// Helper to extract animations from animate prop
-const extractAnimations = (propsStr: string): any[] => {
-  const animateMatch = propsStr.match(/animate=\{\[([\s\S]*?)\]\}/);
-  if (!animateMatch) return [];
-  
-  const animationsStr = animateMatch[1];
-  const animations: any[] = [];
-  
-  // Parse each animation object
-  const animRegex = /\{([^}]+)\}/g;
-  let match;
-  while ((match = animRegex.exec(animationsStr)) !== null) {
-    const animStr = match[1];
-    const anim: any = {};
-    
-    // Extract property
-    const propMatch = animStr.match(/property:\s*["']([^"']+)["']/);
-    if (propMatch) anim.property = propMatch[1];
-    
-    // Extract numeric values
-    ['startFrame', 'endFrame'].forEach(key => {
-      const m = animStr.match(new RegExp(`${key}:\\s*(\\d+)`));
-      if (m) anim[key] = parseInt(m[1]);
-    });
-    
-    // Extract from/to (can be string or number)
-    const fromMatch = animStr.match(/from:\s*(["']([^"']+)["']|(\d+\.?\d*))/);
-    if (fromMatch) anim.from = fromMatch[2] || parseFloat(fromMatch[3]);
-    
-    const toMatch = animStr.match(/to:\s*(["']([^"']+)["']|(\d+\.?\d*))/);
-    if (toMatch) anim.to = toMatch[2] || parseFloat(toMatch[3]);
-    
-    // Extract easing
-    const easingMatch = animStr.match(/easing:\s*["']([^"']+)["']/);
-    if (easingMatch) anim.easing = easingMatch[1];
-    
-    if (anim.property) animations.push(anim);
-  }
-  
-  return animations;
-};
-
 const App: React.FC = () => {
   const [tsxInput, setTsxInput] = useState(DEFAULT_TSX);
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9');
@@ -243,17 +101,16 @@ const App: React.FC = () => {
   const [resolution, setResolution] = useState<Resolution>('1080p');
   const [status, setStatus] = useState<RenderingStatus>({ step: 'idle', message: '', progress: 0 });
   const [aiPrompt, setAiPrompt] = useState('');
-  const [refImage, setRefImage] = useState<{data: string, mimeType: string} | null>(null);
-  const [parsedScene, setParsedScene] = useState<SceneDefinition | null>(null);
-  const [tsxError, setTsxError] = useState<string | null>(null);
+  const [refImage, setRefImage] = useState<{ data: string, mimeType: string } | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  
+  const [showMenu, setShowMenu] = useState(false);
+
   // Settings state - load from localStorage
-  const [provider, setProvider] = useState<ProviderKey>(() => 
+  const [provider, setProvider] = useState<ProviderKey>(() =>
     (localStorage.getItem('ai_provider') as ProviderKey) || 'gemini'
   );
-  const [selectedModel, setSelectedModel] = useState(() => 
+  const [selectedModel, setSelectedModel] = useState(() =>
     localStorage.getItem('ai_model') || PROVIDERS.gemini.models[0].id
   );
   const [apiKeys, setApiKeys] = useState<Record<ProviderKey, string>>(() => ({
@@ -262,76 +119,23 @@ const App: React.FC = () => {
     mistral: localStorage.getItem('apikey_mistral') || '',
     groq: localStorage.getItem('apikey_groq') || '',
   }));
-  
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+
   const previewWrapperRef = useRef<HTMLDivElement>(null);
-  const requestRef = useRef<number>(0);
-  const lastFrameTimeRef = useRef<number>(0);
-  const startTimeRef = useRef<number>(0);
+  const remotionPreviewRef = useRef<RemotionPreviewHandle | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const dims = useMemo(() => {
     const res = resolution === '1080p' ? 1080 : 720;
-    // Applied requested 8px reduction from base monitor resolution
-    if (aspectRatio === '16:9') return { w: ((res * 16) / 9) - 8, h: res - 8 };
-    return { w: ((res * 9) / 16) - 8, h: res - 8 };
-  }, [aspectRatio, resolution]);
+    // Applied requested 8px reduction from base monitor resolution, but ensure integer dimensions for Remotion Player
+    const base = aspectRatio === '16:9'
+      ? { w: (res * 16) / 9, h: res }
+      : { w: (res * 9) / 16, h: res };
 
-  useEffect(() => {
-    try {
-      // Check for basic TSX structure
-      if (tsxInput.includes('<Shape') || tsxInput.includes('<Text') || tsxInput.includes('<Image') || tsxInput.includes('function Scene')) {
-        const parsed = parseTsxToScene(tsxInput, aspectRatio, duration, fps);
-        if (parsed && parsed.layers.length > 0) {
-          setParsedScene(parsed);
-          setTsxError(null);
-        } else if (tsxInput.trim()) {
-          // Allow empty/minimal TSX without error
-          setParsedScene({
-            compositionConfig: {
-              id: "EmptyScene",
-              durationInSeconds: duration,
-              fps: fps,
-              width: aspectRatio === '16:9' ? 1920 : 1080,
-              height: aspectRatio === '16:9' ? 1080 : 1920
-            },
-            preGeneratedData: {},
-            layers: []
-          });
-          setTsxError(null);
-        }
-      } else if (tsxInput.trim()) {
-        setTsxError("No valid components found");
-      } else {
-        setTsxError(null);
-      }
-    } catch (e: any) {
-      setTsxError("Parse Error");
-    }
-  }, [tsxInput, aspectRatio, duration, fps]);
-
-  useEffect(() => {
-    const frameInterval = 1000 / fps;
-    const animate = (time: number) => {
-      if (!startTimeRef.current) startTimeRef.current = time;
-      const deltaTime = time - lastFrameTimeRef.current;
-      if (deltaTime >= frameInterval) {
-        lastFrameTimeRef.current = time - (deltaTime % frameInterval);
-        if (parsedScene && previewCanvasRef.current) {
-          const ctx = previewCanvasRef.current.getContext('2d');
-          if (ctx) {
-            const elapsed = (time - startTimeRef.current) / 1000;
-            const t = elapsed % duration; 
-            drawFrame(ctx, parsedScene, t, dims.w, dims.h);
-          }
-        }
-      }
-      requestRef.current = requestAnimationFrame(animate);
+    return {
+      w: Math.round(base.w - 8),
+      h: Math.round(base.h - 8),
     };
-    requestRef.current = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(requestRef.current);
-  }, [parsedScene, dims, duration, fps]);
+  }, [aspectRatio, resolution]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -357,28 +161,29 @@ const App: React.FC = () => {
 
   const handleAiGenerate = async () => {
     if (!aiPrompt && !refImage) return;
-    
+
     const currentApiKey = apiKeys[provider];
     if (!currentApiKey) {
       setShowSettings(true);
       setStatus({ step: 'error', message: 'Please set your API key in Settings', progress: 0 });
       return;
     }
-    
+
     setStatus({ step: 'ai-thinking', message: isEditMode ? 'Editing...' : 'Generating...', progress: 0 });
-    
+
     try {
-      const systemInstruction = `You are a TSX video scene generator. Read the user's prompt carefully. Output ONLY valid TSX code.
+      const systemInstruction = `You are a TSX video scene generator for Remotion. Read the user's prompt carefully. Output ONLY valid TSX code.
 
 CRITICAL RULES:
 1. Output pure TSX code only - no markdown code blocks, no explanation
-2. Keep scenes CONCISE: max 8-10 components
+2. Keep scenes CONCISE: max 15-20 components
 3. Complete the TSX fully - never truncate
 4. Start with: export default function Scene({ frame, fps, width, height }: SceneProps)
+5. You can use React hooks, animations, and math.
 
 Specs: ${aspectRatio}, 7s duration, 30fps, ${aspectRatio === '16:9' ? '1920x1080' : '1080x1920'}
 
-Available Components:
+Available Primitives (auto-imported):
 - <Shape x="50%" y="50%" width="100%" height="100%" backgroundColor="#color" opacity={1} borderRadius={0} animate={[...]} />
 - <Text x="50%" y="50%" fontSize={72} color="#fff" opacity={1} animate={[...]}>Content</Text>
 - <Image src="url" x="50%" y="50%" width={200} height={200} opacity={1} animate={[...]} />
@@ -386,20 +191,7 @@ Available Components:
 Animation format in animate prop:
 animate={[
   { property: "opacity", startFrame: 0, endFrame: 30, from: 0, to: 1, easing: "easeOutCubic" },
-  { property: "y", startFrame: 0, endFrame: 60, from: "60%", to: "50%", easing: "easeOutCubic" }
 ]}
-
-Animatable properties: x, y, opacity, width, height, rotation. Use % for positions.
-
-Example:
-export default function Scene({ frame, fps, width, height }: SceneProps) {
-  return (
-    <>
-      <Shape x="50%" y="50%" width="100%" height="100%" backgroundColor="#020617" />
-      <Text x="50%" y="50%" fontSize={72} color="#ffffff" opacity={0} animate={[{ property: "opacity", startFrame: 0, endFrame: 30, from: 0, to: 1, easing: "easeOutCubic" }]}>Hello World</Text>
-    </>
-  );
-}
 
 TSX:`;
 
@@ -410,6 +202,7 @@ TSX:`;
       let responseText = '';
 
       // Call appropriate API based on provider
+      // Reusing the exact same logic as before for fetching
       if (provider === 'gemini') {
         const url = `${PROVIDERS.gemini.endpoint}/${selectedModel}:generateContent?key=${currentApiKey}`;
         const response = await fetch(url, {
@@ -429,103 +222,59 @@ TSX:`;
       } else if (provider === 'bigmodel') {
         const response = await fetch(PROVIDERS.bigmodel.endpoint, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${currentApiKey}`
-          },
-          body: JSON.stringify({
-            model: selectedModel,
-            messages: [
-              { role: 'system', content: systemInstruction },
-              { role: 'user', content: userText }
-            ],
-            temperature: 0.3,
-            max_tokens: 16000
-          })
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentApiKey}` },
+          body: JSON.stringify({ model: selectedModel, messages: [{ role: 'system', content: systemInstruction }, { role: 'user', content: userText }], temperature: 0.3, max_tokens: 16000 })
         });
-        if (!response.ok) {
-          const err = await response.json().catch(() => ({}));
-          throw new Error(err.error?.message || `BigModel API Error: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`BigModel API Error: ${response.status}`);
         const data = await response.json();
         responseText = data.choices?.[0]?.message?.content || '';
       } else if (provider === 'mistral') {
         const response = await fetch(PROVIDERS.mistral.endpoint, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${currentApiKey}`
-          },
-          body: JSON.stringify({
-            model: selectedModel,
-            messages: [
-              { role: 'system', content: systemInstruction },
-              { role: 'user', content: userText }
-            ],
-            temperature: 0.3,
-            max_tokens: 16000
-          })
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentApiKey}` },
+          body: JSON.stringify({ model: selectedModel, messages: [{ role: 'system', content: systemInstruction }, { role: 'user', content: userText }], temperature: 0.3, max_tokens: 16000 })
         });
-        if (!response.ok) {
-          const err = await response.json().catch(() => ({}));
-          throw new Error(err.error?.message || `Mistral API Error: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`Mistral API Error: ${response.status}`);
         const data = await response.json();
         responseText = data.choices?.[0]?.message?.content || '';
       } else if (provider === 'groq') {
         const response = await fetch(PROVIDERS.groq.endpoint, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${currentApiKey}`
-          },
-          body: JSON.stringify({
-            model: selectedModel,
-            messages: [
-              { role: 'system', content: systemInstruction },
-              { role: 'user', content: userText }
-            ],
-            temperature: 0.3,
-            max_tokens: 16000
-          })
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentApiKey}` },
+          body: JSON.stringify({ model: selectedModel, messages: [{ role: 'system', content: systemInstruction }, { role: 'user', content: userText }], temperature: 0.3, max_tokens: 16000 })
         });
-        if (!response.ok) {
-          const err = await response.json().catch(() => ({}));
-          throw new Error(err.error?.message || `Groq API Error: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`Groq API Error: ${response.status}`);
         const data = await response.json();
         responseText = data.choices?.[0]?.message?.content || '';
       }
 
       console.log('AI Response:', responseText);
-      
-      // Extract TSX code from response
+
       let tsxCode = responseText;
-      
-      // Remove markdown code blocks if present
       tsxCode = tsxCode.replace(/```tsx?\n?/g, '').replace(/```\n?/g, '');
-      
-      // Find the function declaration
-      const funcMatch = tsxCode.match(/(export\s+default\s+function\s+Scene[\s\S]*)/i);
-      if (funcMatch) {
-        tsxCode = funcMatch[1].trim();
-      } else {
-        // Try to find any function with Scene
-        const altMatch = tsxCode.match(/(function\s+Scene[\s\S]*)/i);
-        if (altMatch) {
-          tsxCode = 'export default ' + altMatch[1].trim();
-        }
-      }
-      
-      // Validate it has our components
-      if (tsxCode.includes('function Scene') && (tsxCode.includes('<Shape') || tsxCode.includes('<Text') || tsxCode.includes('<Image'))) {
+      tsxCode = tsxCode.trim();
+
+      // Prefer full "export default ..." code (supports function, const, arrow, etc).
+      if (/export\s+default\s+/i.test(tsxCode)) {
         setTsxInput(tsxCode);
         setAiPrompt('');
         setRefImage(null);
         setStatus({ step: 'idle', message: '', progress: 0 });
-      } else {
-        throw new Error('No valid TSX scene found in response');
+        return;
       }
+
+      // Fallback: allow bare `function Scene(...) { ... }` by wrapping it.
+      const altMatch = tsxCode.match(/(function\s+Scene[\s\S]*)/i);
+      if (altMatch) {
+        const wrapped = ('export default ' + altMatch[1].trim()).trim();
+        setTsxInput(wrapped);
+        setAiPrompt('');
+        setRefImage(null);
+        setStatus({ step: 'idle', message: '', progress: 0 });
+        return;
+      }
+
+      throw new Error('No valid TSX scene found in response (expected an `export default` Scene).');
     } catch (err: any) {
       console.error('Generation error:', err);
       setStatus({ step: 'error', message: err.message || 'AI Logic Failure', progress: 0 });
@@ -542,45 +291,98 @@ TSX:`;
     setShowSettings(false);
   };
 
-  const startRecording = async () => {
-    if (!parsedScene) return;
-    setStatus({ step: 'recording', message: 'Rendering...', progress: 0 });
-    const canvas = canvasRef.current!;
-    const ctx = canvas.getContext('2d', { alpha: false })!;
-    const stream = canvas.captureStream(fps);
-    
-    // Try MP4 first, fallback to WebM
-    const mimeType = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1') 
-      ? 'video/mp4;codecs=avc1' 
-      : 'video/webm;codecs=vp9';
-    const isMP4 = mimeType.startsWith('video/mp4');
-    
-    const recorder = new MediaRecorder(stream, { mimeType, bitsPerSecond: 12000000 });
-    const chunks: Blob[] = [];
-    recorder.ondataavailable = (e) => chunks.push(e.data);
-    recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: isMP4 ? 'video/mp4' : 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      
-      // Generate filename from prompt or timestamp
-      const baseName = aiPrompt 
-        ? aiPrompt.slice(0, 50).replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_').toLowerCase()
-        : `video_${Date.now()}`;
-      const extension = isMP4 ? 'mp4' : 'webm';
-      const fileName = `${baseName}.${extension}`;
-      
-      setStatus({ step: 'completed', message: '', progress: 100, videoUrl: url, fileName });
-    };
-    recorder.start();
-    
-    const totalFrames = duration * fps;
-    const frameDelay = 1000 / fps;
-    for (let i = 0; i <= totalFrames; i++) {
-      drawFrame(ctx, parsedScene, i / fps, dims.w, dims.h);
-      setStatus(s => ({ ...s, progress: Math.round((i / totalFrames) * 100) }));
-      await new Promise(r => setTimeout(r, frameDelay)); 
+  const exportMp4 = async (mode: 'download' | 'openInNewTab') => {
+    if (!remotionPreviewRef.current) return;
+    if (status.step === 'rendering') return;
+
+    const safeFromPrompt = aiPrompt
+      ? aiPrompt.slice(0, 30).replace(/[^a-z0-9]/gi, '_').toLowerCase()
+      : '';
+    const fileName = `${safeFromPrompt ? safeFromPrompt : 'tsx2video'}_${Date.now()}.mp4`;
+
+    // If user right-clicks, open a new tab immediately to avoid popup blockers.
+    const openedWin = mode === 'openInNewTab' ? window.open('', '_blank') : null;
+    if (mode === 'openInNewTab' && !openedWin) {
+      setStatus({ step: 'error', message: 'Popup blocked. Please allow popups to open the exported video.', progress: 0 });
+      return;
     }
-    recorder.stop();
+
+    if (openedWin) {
+      // Give the user immediate feedback while Remotion is rendering.
+      openedWin.document.title = 'TSX2VIDEO - Rendering MP4...';
+      openedWin.document.body.style.margin = '0';
+      openedWin.document.body.innerHTML = `
+        <div style="
+          font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+          background:#0b1020;
+          color:#e5e7eb;
+          height:100vh;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          flex-direction:column;
+          gap:12px;
+        ">
+          <div style="font-weight:800;font-size:18px;">Rendering MP4...</div>
+          <div style="font-size:13px;color:#9ca3af;">This can take a while depending on your scene.</div>
+        </div>
+      `;
+    }
+
+    setStatus({ step: 'rendering', message: 'Rendering MP4...', progress: 0 });
+
+    try {
+      const { blobUrl } = await remotionPreviewRef.current.renderMp4({
+        fileName,
+        onProgress: (p) => {
+          const pct = Math.max(0, Math.min(100, Math.round((p.progress ?? 0) * 100)));
+          setStatus({
+            step: 'rendering',
+            message: `Rendering MP4... ${pct}%`,
+            progress: pct,
+          });
+        },
+      });
+
+      if (mode === 'openInNewTab') {
+        openedWin!.location.href = blobUrl;
+      } else {
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = fileName;
+        a.click();
+      }
+
+      setStatus({ step: 'completed', message: '', progress: 100, videoUrl: blobUrl, fileName });
+    } catch (err: any) {
+      console.error('Export error:', err);
+      if (openedWin) {
+        openedWin.document.title = 'TSX2VIDEO - Export Failed';
+        openedWin.document.body.innerHTML = `
+          <div style="
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+            background:#0b1020;
+            color:#ef4444;
+            height:100vh;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            padding:20px;
+            text-align:center;
+          ">
+            <div>
+              <div style="font-weight:800;font-size:18px;margin-bottom:10px;">Export failed</div>
+              <div style="color:#fca5a5;font-size:13px;white-space:pre-wrap;">${String(err?.message || err || 'Unknown error')}</div>
+            </div>
+          </div>
+        `;
+      }
+      setStatus({
+        step: 'error',
+        message: err?.message || 'Export failed. Try again.',
+        progress: 0,
+      });
+    }
   };
 
   return (
@@ -600,11 +402,11 @@ TSX:`;
           </div>
           <div className="flex items-center gap-2 bg-slate-900/50 px-3 py-1 rounded-xl border border-white/5">
             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Duration</label>
-            <input 
-              type="number" 
-              min="1" 
-              max="60" 
-              value={duration} 
+            <input
+              type="number"
+              min="1"
+              max="60"
+              value={duration}
               onChange={(e) => setDuration(Math.max(1, Math.min(60, parseInt(e.target.value) || 1)))}
               className="w-12 bg-slate-800 text-white text-xs px-2 py-1 rounded-lg outline-none focus:ring-1 focus:ring-white/30 text-center"
             />
@@ -614,7 +416,7 @@ TSX:`;
             <button onClick={() => setFps(30)} className={`px-4 py-1 rounded-lg text-[10px] font-bold transition-all ${fps === 30 ? 'bg-white text-slate-900' : 'text-slate-500 hover:text-white'}`}>30 FPS</button>
             <button onClick={() => setFps(60)} className={`px-4 py-1 rounded-lg text-[10px] font-bold transition-all ${fps === 60 ? 'bg-white text-slate-900' : 'text-slate-500 hover:text-white'}`}>60 FPS</button>
           </div>
-          <button 
+          <button
             onClick={() => setShowSettings(true)}
             className="w-9 h-9 bg-slate-900/50 border border-white/5 rounded-xl text-slate-400 hover:text-white hover:border-white/20 transition-all flex items-center justify-center"
           >
@@ -634,53 +436,34 @@ TSX:`;
               </button>
             </div>
 
-            {/* Active Model Selection - Only shows models from providers with valid API keys */}
             <div className="mb-6">
               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Active Model for Generation</label>
-              {(() => {
-                const availableModels = (Object.keys(PROVIDERS) as ProviderKey[])
+              <select
+                value={`${provider}:${selectedModel}`}
+                onChange={(e) => {
+                  const [newProvider, ...modelParts] = e.target.value.split(':');
+                  const newModel = modelParts.join(':');
+                  setProvider(newProvider as ProviderKey);
+                  setSelectedModel(newModel);
+                }}
+                className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-white/30 transition-all"
+              >
+                {(Object.keys(PROVIDERS) as ProviderKey[])
                   .filter(key => apiKeys[key]?.trim())
-                  .flatMap(key => PROVIDERS[key].models.map(m => ({ ...m, provider: key, providerName: PROVIDERS[key].name })));
-                
-                if (availableModels.length === 0) {
-                  return (
-                    <div className="bg-slate-800/50 border border-white/5 rounded-xl px-4 py-3 text-sm text-slate-500">
-                      <i className="fas fa-info-circle mr-2"></i>
-                      Add API keys below to enable models
-                    </div>
-                  );
-                }
-                
-                return (
-                  <select
-                    value={`${provider}:${selectedModel}`}
-                    onChange={(e) => {
-                      const [newProvider, ...modelParts] = e.target.value.split(':');
-                      const newModel = modelParts.join(':');
-                      setProvider(newProvider as ProviderKey);
-                      setSelectedModel(newModel);
-                    }}
-                    className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-3 text-sm outline-none focus:border-white/30 transition-all"
-                  >
-                    {(Object.keys(PROVIDERS) as ProviderKey[])
-                      .filter(key => apiKeys[key]?.trim())
-                      .map(key => (
-                        <optgroup key={key} label={PROVIDERS[key].name}>
-                          {PROVIDERS[key].models.map(m => (
-                            <option key={`${key}:${m.id}`} value={`${key}:${m.id}`}>{m.name}</option>
-                          ))}
-                        </optgroup>
+                  .map(key => (
+                    <optgroup key={key} label={PROVIDERS[key].name}>
+                      {PROVIDERS[key].models.map(m => (
+                        <option key={`${key}:${m.id}`} value={`${key}:${m.id}`}>{m.name}</option>
                       ))}
-                  </select>
-                );
-              })()}
+                    </optgroup>
+                  ))}
+              </select>
             </div>
 
             <div className="border-t border-white/5 pt-4 mb-4">
               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 block">API Keys</label>
             </div>
 
-            {/* API Keys for all providers */}
             {(Object.keys(PROVIDERS) as ProviderKey[]).map(key => (
               <div key={key} className="mb-4">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-2 block">
@@ -694,16 +477,9 @@ TSX:`;
                   placeholder={`Enter ${PROVIDERS[key].name} API key...`}
                   className="w-full bg-slate-800 border border-white/10 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-white/30 transition-all placeholder:text-slate-600"
                 />
-                <p className="text-[9px] text-slate-600 mt-1">
-                  {key === 'gemini' && 'aistudio.google.com'}
-                  {key === 'bigmodel' && 'open.bigmodel.cn'}
-                  {key === 'mistral' && 'console.mistral.ai'}
-                  {key === 'groq' && 'console.groq.com'}
-                </p>
               </div>
             ))}
 
-            {/* Save Button */}
             <button
               onClick={saveSettings}
               className="w-full py-3.5 rounded-xl bg-white text-slate-950 font-black text-[11px] uppercase tracking-wider hover:scale-[1.02] active:scale-95 transition-all mt-2"
@@ -717,11 +493,10 @@ TSX:`;
       <main className="flex-1 flex overflow-hidden relative">
         <aside className="w-[360px] border-r border-white/5 flex flex-col bg-slate-900/10 z-10 relative">
           <div className="p-4 flex flex-col gap-3 flex-1 overflow-hidden">
-            
-            {/* AI Generation Card */}
+
             <div className={`flex flex-col gap-2 p-3 rounded-2xl border transition-all ${isEditMode ? 'bg-green-500/5 border-green-500/20' : 'bg-white/5 border-white/10'}`}>
               <div className="relative bg-slate-950/40 border border-white/5 rounded-xl p-3">
-                <textarea 
+                <textarea
                   placeholder={isEditMode ? "How should it change?" : "Describe your video scene..."}
                   className="w-full bg-transparent border-none text-sm outline-none resize-none h-16 placeholder:text-slate-600"
                   value={aiPrompt}
@@ -732,8 +507,8 @@ TSX:`;
                 </button>
                 <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
               </div>
-              
-              <button 
+
+              <button
                 onClick={handleAiGenerate}
                 disabled={status.step === 'ai-thinking' || (!aiPrompt && !refImage)}
                 className={`w-full py-3 rounded-xl font-black text-[11px] uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-lg disabled:opacity-20 ${isEditMode ? 'bg-green-400 text-slate-950' : 'bg-white text-slate-950'}`}
@@ -743,11 +518,9 @@ TSX:`;
               </button>
             </div>
 
-            {/* Code Editor Card */}
             <div className="flex-[0.9] flex flex-col min-h-0">
               <div className="flex items-center justify-between mb-1.5 px-1">
                 <span className="text-[10px] font-bold text-slate-600 uppercase tracking-widest">TSX Scene</span>
-                {tsxError && <span className="text-[9px] font-bold text-red-400 uppercase bg-red-400/10 px-2 py-0.5 rounded">{tsxError}</span>}
               </div>
               <textarea
                 className="flex-1 bg-slate-950/50 border border-white/5 rounded-2xl p-4 code-font text-[11px] outline-none resize-none text-slate-300 focus:border-white/20 transition-all leading-relaxed"
@@ -757,22 +530,19 @@ TSX:`;
               />
             </div>
 
-            {/* Render Button */}
-            <button
+            {/* <button
               onClick={startRecording}
-              disabled={status.step === 'recording' || !!tsxError}
-              className="w-full py-3.5 rounded-xl bg-white text-slate-950 font-black text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-10"
+              className="w-full py-3.5 rounded-xl bg-white text-slate-950 font-black text-[11px] uppercase tracking-wider flex items-center justify-center gap-2 hover:scale-[1.02] active:scale-95 transition-all"
             >
-              <i className={`fas ${status.step === 'recording' ? 'fa-spinner fa-spin' : 'fa-video'}`}></i>
-              {status.step === 'recording' ? `Rendering ${status.progress}%` : 'Export .MP4'}
-            </button>
+              <i className="fas fa-download"></i>
+              Export MP4
+            </button> */}
           </div>
         </aside>
 
         <section className="flex-1 relative flex items-center justify-center p-12 bg-[#000208] overflow-hidden">
-          {/* Controls Overlay - Elevated Z-Index */}
           <div className="absolute top-4 right-6 flex items-center gap-3 z-[100]">
-            <button 
+            <button
               onClick={() => setIsEditMode(!isEditMode)}
               className={`px-5 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all border flex items-center gap-2 shadow-xl ${isEditMode ? 'bg-green-400 border-green-400 text-slate-950 shadow-green-400/20' : 'bg-slate-900 border-white/10 text-slate-400 hover:text-white hover:border-white/20'}`}
             >
@@ -782,47 +552,70 @@ TSX:`;
               <i className="fas fa-expand-alt"></i>
             </button>
           </div>
-          
-          <div 
+
+          <div
             ref={previewWrapperRef}
             className="relative shadow-[0_0_120px_rgba(0,0,0,0.9)] rounded-[2.5rem] overflow-hidden border border-white/10 bg-black flex items-center justify-center transition-all duration-700 z-0"
-            style={{ 
-              width: '100%', 
-              maxWidth: aspectRatio === '16:9' ? '872px' : '332px', 
-              aspectRatio: aspectRatio === '16:9' ? '16/9' : '9/16' 
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setShowMenu(false);
+              exportMp4('openInNewTab');
+            }}
+            style={{
+              width: '100%',
+              maxWidth: aspectRatio === '16:9' ? '872px' : '332px',
+              aspectRatio: aspectRatio === '16:9' ? '16/9' : '9/16'
             }}
           >
-            <canvas ref={previewCanvasRef} width={dims.w} height={dims.h} className="w-full h-full object-contain" />
-          </div>
+            <RemotionPreview
+              ref={remotionPreviewRef}
+              code={tsxInput}
+              durationInSeconds={duration}
+              fps={fps}
+              width={dims.w}
+              height={dims.h}
+            />
 
-          <canvas ref={canvasRef} width={dims.w} height={dims.h} className="hidden" />
-
-          {/* Export Overlay */}
-          {status.step === 'completed' && (
-            <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-xl flex items-center justify-center z-[110] animate-in fade-in duration-300">
-              <div className="bg-slate-900 border border-white/10 p-10 rounded-[3rem] text-center max-w-xs w-full shadow-2xl">
-                <div className="w-16 h-16 bg-green-400 rounded-full flex items-center justify-center mx-auto mb-6">
-                  <i className="fas fa-check text-2xl text-slate-950"></i>
-                </div>
-                <h2 className="text-xl font-black mb-1 uppercase tracking-tight">Export Ready</h2>
-                <p className="text-slate-500 text-xs mb-8 font-medium">Rendered at 1080p 30fps quality.</p>
-                <div className="flex flex-col gap-3">
-                  <a href={status.videoUrl} download={status.fileName || 'video.mp4'} className="w-full py-4 bg-white rounded-2xl font-black text-slate-950 text-[11px] uppercase tracking-widest hover:scale-[1.02] transition-all flex items-center justify-center gap-2">
-                    <i className="fas fa-save"></i> Save Video
-                  </a>
-                  <button onClick={() => setStatus({ ...status, step: 'idle' })} className="w-full py-4 text-slate-600 text-[10px] font-black uppercase tracking-widest">Return</button>
+            {(status.step === 'rendering' || status.step === 'error') && (
+              <div className="absolute inset-0 z-[60] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-slate-900/70 border border-white/10 rounded-2xl p-5 text-center max-w-[320px]">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-slate-300">
+                    {status.step === 'rendering' ? 'Rendering MP4' : 'Export Error'}
+                  </div>
+                  <div className="text-[11px] text-slate-200 mt-2 whitespace-pre-wrap">
+                    {status.message || (status.step === 'rendering' ? 'Working...' : 'Something went wrong.')}
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {status.step === 'error' && (
-             <div className="absolute bottom-10 left-1/2 -translate-x-1/2 bg-red-500/10 border border-red-500/20 px-6 py-3 rounded-2xl flex items-center gap-3 animate-in slide-in-from-bottom-5 z-[120]">
-               <i className="fas fa-exclamation-circle text-red-500"></i>
-               <span className="text-xs font-bold text-red-400">{status.message}</span>
-               <button onClick={() => setStatus({...status, step: 'idle'})} className="text-red-500 hover:text-red-400 px-2"><i className="fas fa-times"></i></button>
-             </div>
-          )}
+            {/* Context Menu Overlay */}
+            <div className="absolute top-4 right-4 z-[50]">
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
+                className="w-8 h-8 rounded-full bg-black/50 backdrop-blur-sm border border-white/10 text-white flex items-center justify-center hover:bg-white/20 transition-all"
+                disabled={status.step === 'rendering'}
+              >
+                <i className="fas fa-ellipsis-v text-xs"></i>
+              </button>
+
+              {showMenu && (
+                <div className="absolute right-0 top-10 bg-slate-900 border border-white/10 rounded-xl shadow-xl overflow-hidden min-w-[140px] animate-in fade-in zoom-in-95 duration-200">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowMenu(false);
+                      exportMp4('download');
+                    }}
+                    className="w-full px-4 py-3 text-left text-[11px] font-bold uppercase tracking-wider text-slate-300 hover:bg-white/10 hover:text-white flex items-center gap-2"
+                  >
+                    <i className="fas fa-download"></i> Download MP4
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </section>
       </main>
     </div>

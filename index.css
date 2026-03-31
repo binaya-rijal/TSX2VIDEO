@@ -1,0 +1,4 @@
+/* Intentionally minimal.
+   This file exists because index.html references `/index.css`.
+   The app's styling is primarily done via Tailwind utility classes and inline CSS. */
+
