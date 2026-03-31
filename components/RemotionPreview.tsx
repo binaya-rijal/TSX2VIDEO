@@ -154,6 +154,14 @@ const RemotionPreviewForward = forwardRef<RemotionPreviewHandle, PreviewProps>((
             const config = Remotion.useVideoConfig();
             const durationSec = config.durationInFrames / config.fps;
 
+            // Compatibility shim for generated scenes that reference common
+            // dimension helpers as free variables (e.g. minDim).
+            const compatGlobals = globalThis as Record<string, unknown>;
+            compatGlobals.minDim = Math.min(config.width, config.height);
+            compatGlobals.maxDim = Math.max(config.width, config.height);
+            compatGlobals.centerX = config.width / 2;
+            compatGlobals.centerY = config.height / 2;
+
             return (
                 <Component
                     frame={frame}
